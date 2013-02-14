@@ -137,9 +137,11 @@ static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
 static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
 {
     SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
-    if (s->io->seek(s->io, (PHYSFS_uint64) pos))
-        return SZ_OK;
-    return SZE_FAIL;
+
+    if (!s->io->seek(s->io, (PHYSFS_uint64) pos))
+        return SZE_FAIL;
+
+    return SZ_OK;
 } /* sz_file_seek */
 
 
