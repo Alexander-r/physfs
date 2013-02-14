@@ -128,7 +128,7 @@ set(PHYSFS_SRCS
     src/archiver_unpacked.c
     src/archiver_grp.c
     src/archiver_hog.c
-    src/archiver_lzma.c
+    src/archiver_7z.c
     src/archiver_mvl.c
     src/archiver_qpak.c
     src/archiver_wad.c
