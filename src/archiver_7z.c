@@ -78,17 +78,17 @@ typedef struct _SZfile
 
 /* Memory management implementations to be passed to 7z */
 
-static void *SzAllocPhysicsFS(size_t size)
+static void *sz_alloc(size_t size)
 {
     return ((size == 0) ? NULL : allocator.Malloc(size));
-} /* SzAllocPhysicsFS */
+} /* sz_alloc */
 
 
-static void SzFreePhysicsFS(void *address)
+static void sz_free(void *address)
 {
     if (address != NULL)
         allocator.Free(address);
-} /* SzFreePhysicsFS */
+} /* sz_free */
 
 
 /* Filesystem implementations to be passed to 7z */
@@ -99,7 +99,7 @@ static void SzFreePhysicsFS(void *address)
  * Read implementation, to be passed to 7z
  * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
  */
-SZ_RESULT SzFileReadImp(void *object, void **buffer, size_t maxReqSize,
+static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
                         size_t *processedSize)
 {
     FileInputStream *s = (FileInputStream *)(object - offsetof(FileInputStream, inStream)); /* HACK! */
@@ -113,7 +113,7 @@ SZ_RESULT SzFileReadImp(void *object, void **buffer, size_t maxReqSize,
         *processedSize = (size_t) processedSizeLoc;
 
     return SZ_OK;
-} /* SzFileReadImp */
+} /* sz_file_read */
 
 #else
 
@@ -121,7 +121,7 @@ SZ_RESULT SzFileReadImp(void *object, void **buffer, size_t maxReqSize,
  * Read implementation, to be passed to 7z
  * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
  */
-SZ_RESULT SzFileReadImp(void *object, void *buffer, size_t size,
+static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
                         size_t *processedSize)
 {
     FileInputStream *s = (FileInputStream *)((unsigned long)object - offsetof(FileInputStream, inStream)); /* HACK! */
@@ -129,7 +129,7 @@ SZ_RESULT SzFileReadImp(void *object, void *buffer, size_t size,
     if (processedSize != NULL)
         *processedSize = processedSizeLoc;
     return SZ_OK;
-} /* SzFileReadImp */
+} /* sz_file_read */
 
 #endif
 
@@ -137,13 +137,13 @@ SZ_RESULT SzFileReadImp(void *object, void *buffer, size_t size,
  * Seek implementation, to be passed to 7z
  * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
  */
-SZ_RESULT SzFileSeekImp(void *object, CFileSize pos)
+static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
 {
     FileInputStream *s = (FileInputStream *)((unsigned long)object - offsetof(FileInputStream, inStream)); /* HACK! */
     if (s->io->seek(s->io, (PHYSFS_uint64) pos))
         return SZ_OK;
     return SZE_FAIL;
-} /* SzFileSeekImp */
+} /* sz_file_seek */
 
 
 /*
@@ -259,14 +259,14 @@ static void sz_archive_init(SZarchive *archive)
     memset(archive, 0, sizeof(*archive));
 
     /* Prepare callbacks for 7z */
-    archive->stream.inStream.Read = SzFileReadImp;
-    archive->stream.inStream.Seek = SzFileSeekImp;
+    archive->stream.inStream.Read = sz_file_read;
+    archive->stream.inStream.Seek = sz_file_seek;
 
-    archive->stream.allocImp.Alloc = SzAllocPhysicsFS;
-    archive->stream.allocImp.Free = SzFreePhysicsFS;
+    archive->stream.allocImp.Alloc = sz_alloc;
+    archive->stream.allocImp.Free = sz_free;
 
-    archive->stream.allocTempImp.Alloc = SzAllocPhysicsFS;
-    archive->stream.allocTempImp.Free = SzFreePhysicsFS;
+    archive->stream.allocTempImp.Alloc = sz_alloc;
+    archive->stream.allocTempImp.Free = sz_free;
 } /* sz_archive_init */
 
 
@@ -467,7 +467,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
                              &archive->stream.allocImp,
                              &archive->stream.allocTempImp)) != SZ_OK)
     {
-        SzArDbExFree(&archive->db, SzFreePhysicsFS);
+        SzArDbExFree(&archive->db, sz_free);
         sz_archive_exit(archive);
         return NULL; /* Error is set by sz_err! */
     } /* if */
@@ -476,7 +476,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     archive->files = (SZfile *) allocator.Malloc(len);
     if (archive->files == NULL)
     {
-        SzArDbExFree(&archive->db, SzFreePhysicsFS);
+        SzArDbExFree(&archive->db, sz_free);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -491,7 +491,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     archive->folders = (SZfolder *) allocator.Malloc(len);
     if (archive->folders == NULL)
     {
-        SzArDbExFree(&archive->db, SzFreePhysicsFS);
+        SzArDbExFree(&archive->db, sz_free);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -504,7 +504,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
 
     if(!sz_files_init(archive))
     {
-        SzArDbExFree(&archive->db, SzFreePhysicsFS);
+        SzArDbExFree(&archive->db, sz_free);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OTHER_ERROR, NULL);
     }
@@ -620,7 +620,7 @@ static void SZ_closeArchive(void *opaque)
     } /* for */
 #endif
 
-    SzArDbExFree(&archive->db, SzFreePhysicsFS);
+    SzArDbExFree(&archive->db, sz_free);
     archive->stream.io->destroy(archive->stream.io);
     sz_archive_exit(archive);
 } /* SZ_closeArchive */
