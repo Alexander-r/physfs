@@ -31,9 +31,7 @@ extern int TestSignatureCandidate(Byte *testBytes);
  */
 typedef struct _SZfileinstream
 {
-    ISzAlloc allocImp; /* Allocation implementation, used by 7z */
-    ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
-    ISzInStream inStream; /* Input stream with read callbacks, used by 7z */
+    ISzInStream s; /* Input stream with read callbacks, used by 7z */
     PHYSFS_Io *io;  /* Filehandle, used by read implementation */
 #ifdef _LZMA_IN_CB
     Byte buffer[BUFFER_SIZE]; /* Buffer, used by read implementation */
@@ -58,10 +56,12 @@ typedef struct _SZfolder
  */
 typedef struct _SZarchive
 {
+    CArchiveDatabaseEx db; /* For 7z: Database */
+    ISzAlloc allocImp; /* Allocation implementation, used by 7z */
+    ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
+    SZfileinstream inStream; /* Input stream with read callbacks, used by 7z */
     struct _SZfile *files; /* Array of files, size == archive->db.Database.NumFiles */
     SZfolder *folders; /* Array of folders, size == archive->db.Database.NumFolders */
-    CArchiveDatabaseEx db; /* For 7z: Database */
-    SZfileinstream stream; /* For 7z: Input file incl. read and seek callbacks */
 } SZarchive;
 
 /* Set by SZ_openArchive(), except offset which is set by SZ_read() */
@@ -97,12 +97,11 @@ static void sz_free(void *address)
 
 /*
  * Read implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
                         size_t *processedSize)
 {
-    SZfileinstream *s = (SZfileinstream *)(object - offsetof(SZfileinstream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
     PHYSFS_sint64 processedSizeLoc = 0;
 
     if (maxReqSize > BUFFER_SIZE)
@@ -119,12 +118,11 @@ static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
 
 /*
  * Read implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
                         size_t *processedSize)
 {
-    SZfileinstream *s = (SZfileinstream *)((unsigned long)object - offsetof(SZfileinstream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
     const size_t processedSizeLoc = s->io->read(s->io, buffer, size);
     if (processedSize != NULL)
         *processedSize = processedSizeLoc;
@@ -135,11 +133,10 @@ static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
 
 /*
  * Seek implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
 {
-    SZfileinstream *s = (SZfileinstream *)((unsigned long)object - offsetof(SZfileinstream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
     if (s->io->seek(s->io, (PHYSFS_uint64) pos))
         return SZ_OK;
     return SZE_FAIL;
@@ -259,14 +256,14 @@ static void sz_archive_init(SZarchive *archive)
     memset(archive, 0, sizeof(*archive));
 
     /* Prepare callbacks for 7z */
-    archive->stream.inStream.Read = sz_file_read;
-    archive->stream.inStream.Seek = sz_file_seek;
+    archive->allocImp.Alloc = sz_alloc;
+    archive->allocImp.Free = sz_free;
 
-    archive->stream.allocImp.Alloc = sz_alloc;
-    archive->stream.allocImp.Free = sz_free;
+    archive->allocTempImp.Alloc = sz_alloc;
+    archive->allocTempImp.Free = sz_free;
 
-    archive->stream.allocTempImp.Alloc = sz_alloc;
-    archive->stream.allocTempImp.Free = sz_free;
+    archive->inStream.s.Read = sz_file_read;
+    archive->inStream.s.Seek = sz_file_seek;
 } /* sz_archive_init */
 
 
@@ -334,7 +331,7 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
     if (file->folder->cache == NULL)
     {
         const int rc = sz_err(SzExtract(
-            &file->archive->stream.inStream, /* compressed data */
+            &file->archive->inStream.s, /* compressed data */
             &file->archive->db, /* 7z's database, containing everything */
             file->index, /* Index into database arrays */
             /* Index of cached folder, will be changed by SzExtract */
@@ -346,8 +343,8 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
             /* Offset of this file inside the cache, set by SzExtract */
             &file->offset,
             &fileSize, /* Size of this file */
-            &file->archive->stream.allocImp,
-            &file->archive->stream.allocTempImp));
+            &file->archive->allocImp,
+            &file->archive->allocTempImp));
 
         if (rc != SZ_OK)
             return -1;
@@ -458,14 +455,14 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     BAIL_IF_MACRO(archive == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
 
     sz_archive_init(archive);
-    archive->stream.io = io;
+    archive->inStream.io = io;
 
     CrcGenerateTable();
     SzArDbExInit(&archive->db);
-    if (sz_err(SzArchiveOpen(&archive->stream.inStream,
+    if (sz_err(SzArchiveOpen(&archive->inStream.s,
                              &archive->db,
-                             &archive->stream.allocImp,
-                             &archive->stream.allocTempImp)) != SZ_OK)
+                             &archive->allocImp,
+                             &archive->allocTempImp)) != SZ_OK)
     {
         SzArDbExFree(&archive->db, sz_free);
         sz_archive_exit(archive);
@@ -621,7 +618,7 @@ static void SZ_closeArchive(void *opaque)
 #endif
 
     SzArDbExFree(&archive->db, sz_free);
-    archive->stream.io->destroy(archive->stream.io);
+    archive->inStream.io->destroy(archive->inStream.io);
     sz_archive_exit(archive);
 } /* SZ_closeArchive */
 
