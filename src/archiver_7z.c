@@ -12,18 +12,9 @@
 
 #if PHYSFS_SUPPORTS_7Z
 
+#include "lzma/C/7z.h"
+#include "lzma/C/7zFile.h"
 #include "lzma/C/7zCrc.h"
-#include "lzma/C/Archive/7z/7zIn.h"
-#include "lzma/C/Archive/7z/7zExtract.h"
-
-
-/* 7z internal from 7zIn.c */
-extern int TestSignatureCandidate(Byte *testBytes);
-
-
-#ifdef _LZMA_IN_CB
-# define BUFFER_SIZE (1 << 12)
-#endif /* _LZMA_IN_CB */
 
 
 /*
@@ -31,11 +22,8 @@ extern int TestSignatureCandidate(Byte *testBytes);
  */
 typedef struct _SZfileinstream
 {
-    ISzInStream s; /* Input stream with read callbacks, used by 7z */
+    ISeekInStream s; /* Read callbacks, used by 7z */
     PHYSFS_Io *io;  /* Filehandle, used by read implementation */
-#ifdef _LZMA_IN_CB
-    Byte buffer[BUFFER_SIZE]; /* Buffer, used by read implementation */
-#endif /* _LZMA_IN_CB */
 } SZfileinstream;
 
 /*
@@ -56,9 +44,10 @@ typedef struct _SZfolder
  */
 typedef struct _SZarchive
 {
-    CArchiveDatabaseEx db; /* For 7z: Database */
+    CSzArEx db; /* For 7z: Database */
     ISzAlloc allocImp; /* Allocation implementation, used by 7z */
     ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
+    CLookToRead lookStream; /* Input stream wrapper with read callbacks, used by 7z */
     SZfileinstream inStream; /* Input stream with read callbacks, used by 7z */
     struct _SZfile *files; /* Array of files, size == archive->db.Database.NumFiles */
     SZfolder *folders; /* Array of folders, size == archive->db.Database.NumFolders */
@@ -70,22 +59,25 @@ typedef struct _SZfile
     PHYSFS_uint32 index; /* Index of file in archive */
     SZarchive *archive; /* Link to corresponding archive */
     SZfolder *folder; /* Link to corresponding folder */
-    CFileItem *item; /* For 7z: File info, eg. name, size */
+    CSzFileItem *item; /* For 7z: File info, eg. name, size */
     size_t offset; /* Offset in folder */
     size_t position; /* Current "virtual" position in file */
+    const char *name; /* Name of file */
 } SZfile;
 
 
 /* Memory management implementations to be passed to 7z */
 
-static void *sz_alloc(size_t size)
+static void *sz_alloc(void *p, size_t size)
 {
+    (void)p;
     return ((size == 0) ? NULL : allocator.Malloc(size));
 } /* sz_alloc */
 
 
-static void sz_free(void *address)
+static void sz_free(void *p, void *address)
 {
+    (void)p;
     if (address != NULL)
         allocator.Free(address);
 } /* sz_free */
@@ -93,53 +85,46 @@ static void sz_free(void *address)
 
 /* Filesystem implementations to be passed to 7z */
 
-#ifdef _LZMA_IN_CB
-
 /*
  * Read implementation, to be passed to 7z
  */
-static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
-                        size_t *processedSize)
+static SRes sz_file_read(void *object, void *buffer, size_t *size)
 {
-    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
-    PHYSFS_sint64 processedSizeLoc = 0;
+    BAIL_IF_MACRO(size == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
-    if (maxReqSize > BUFFER_SIZE)
-        maxReqSize = BUFFER_SIZE;
-    processedSizeLoc = s->io->read(s->io, s->buffer, maxReqSize);
-    *buffer = s->buffer;
-    if (processedSize != NULL)
-        *processedSize = (size_t) processedSizeLoc;
+    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
+
+    *size = s->io->read(s->io, buffer, *size);
 
     return SZ_OK;
 } /* sz_file_read */
 
-#else
-
-/*
- * Read implementation, to be passed to 7z
- */
-static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
-                        size_t *processedSize)
-{
-    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
-    const size_t processedSizeLoc = s->io->read(s->io, buffer, size);
-    if (processedSize != NULL)
-        *processedSize = processedSizeLoc;
-    return SZ_OK;
-} /* sz_file_read */
-
-#endif
 
 /*
  * Seek implementation, to be passed to 7z
  */
-static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
+static SRes sz_file_seek(void *object, Int64 *pos, ESzSeek origin)
 {
-    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
+    BAIL_IF_MACRO(pos == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
-    if (!s->io->seek(s->io, (PHYSFS_uint64) pos))
-        return SZE_FAIL;
+    SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
+    PHYSFS_uint64 position = *pos;
+
+    switch (origin) {
+        case SZ_SEEK_SET:
+            break;
+        case SZ_SEEK_CUR:
+            position = s->io->tell(s->io) + position;
+            break;
+        case SZ_SEEK_END:
+            position = s->io->length(s->io) - position;
+            break;
+    }
+
+    if (!s->io->seek(s->io, position))
+        return SZ_ERROR_FAIL;
+
+    *pos = position;
 
     return SZ_OK;
 } /* sz_file_seek */
@@ -148,7 +133,7 @@ static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
 /*
  * Translate Microsoft FILETIME (used by 7zip) into UNIX timestamp
  */
-static PHYSFS_sint64 sz_filetime_to_unix_timestamp(CArchiveFileTime *ft)
+static PHYSFS_sint64 sz_filetime_to_unix_timestamp(CNtfsFileTime *ft)
 {
     /* MS counts in nanoseconds ... */
     const PHYSFS_uint64 FILETIME_NANOTICKS_PER_SECOND = __PHYSFS_UI64(10000000);
@@ -168,7 +153,7 @@ static int sz_file_cmp_stdlib(const void *key, const void *object)
 {
     const char *name = (const char *) key;
     SZfile *file = (SZfile *) object;
-    return strcmp(name, file->item->Name);
+    return strcmp(name, file->name);
 } /* sz_file_cmp_stdlib */
 
 
@@ -179,7 +164,7 @@ static int sz_file_cmp_stdlib(const void *key, const void *object)
 static int sz_file_cmp(void *_a, size_t one, size_t two)
 {
     SZfile *files = (SZfile *) _a;
-    return strcmp(files[one].item->Name, files[two].item->Name);
+    return strcmp(files[one].name, files[two].name);
 } /* sz_file_cmp */
 
 
@@ -202,7 +187,7 @@ static void sz_file_swap(void *_a, size_t one, size_t two)
  */
 static SZfile * sz_find_file(const SZarchive *archive, const char *name)
 {
-    SZfile *file = bsearch(name, archive->files, archive->db.Database.NumFiles, sizeof(*archive->files), sz_file_cmp_stdlib); /* FIXME: Should become __PHYSFS_search!!! */
+    SZfile *file = bsearch(name, archive->files, archive->db.db.NumFiles, sizeof(*archive->files), sz_file_cmp_stdlib);
 
     BAIL_IF_MACRO(file == NULL, PHYSFS_ERR_NOT_FOUND, NULL);
 
@@ -221,9 +206,20 @@ static int sz_file_init(SZarchive *archive, PHYSFS_uint32 fileIndex)
     file->index = fileIndex; /* Store index into 7z array, since we sort our own. */
     file->archive = archive;
     file->folder = (folderIndex != (PHYSFS_uint32)-1 ? &archive->folders[folderIndex] : NULL); /* Directories don't have a folder (they contain no own data...) */
-    file->item = &archive->db.Database.Files[fileIndex]; /* Holds crucial data and is often referenced -> Store link */
+    file->item = &archive->db.db.Files[fileIndex]; /* Holds crucial data and is often referenced -> Store link */
     file->position = 0;
-    file->offset = 0; /* Offset will be set by SZ_read() */
+    file->offset = -1; /* Offset will be set by SZ_read() */
+
+    size_t len = SzArEx_GetFileNameUtf16(&file->archive->db, file->index, NULL);
+
+    PHYSFS_uint16 *buf16 = allocator.Malloc(len * sizeof(*buf16));
+    SzArEx_GetFileNameUtf16(&file->archive->db, file->index, buf16);
+
+    size_t len8 = len * 2; /* UTF-16 strings may need double the size in UTF-8 */
+    char *buf8 = allocator.Malloc(len8);
+    PHYSFS_utf8FromUtf16(buf16, buf8, len8);
+
+    file->name = buf8;
 
     return 1;
 } /* sz_file_init */
@@ -234,7 +230,7 @@ static int sz_file_init(SZarchive *archive, PHYSFS_uint32 fileIndex)
  */
 static int sz_files_init(SZarchive *archive)
 {
-    PHYSFS_uint32 fileIndex = 0, numFiles = archive->db.Database.NumFiles;
+    PHYSFS_uint32 fileIndex = 0, numFiles = archive->db.db.NumFiles;
 
     for (fileIndex = 0; fileIndex < numFiles; fileIndex++ )
     {
@@ -266,6 +262,11 @@ static void sz_archive_init(SZarchive *archive)
 
     archive->inStream.s.Read = sz_file_read;
     archive->inStream.s.Seek = sz_file_seek;
+
+    /* Prepare input wrapper callbacks for 7z */
+    LookToRead_CreateVTable(&archive->lookStream, False);
+    archive->lookStream.realStream = &archive->inStream.s;
+    LookToRead_Init(&archive->lookStream);
 } /* sz_archive_init */
 
 
@@ -274,6 +275,13 @@ static void sz_archive_init(SZarchive *archive)
  */
 static void sz_archive_exit(SZarchive *archive)
 {
+    PHYSFS_uint32 fileIndex = 0, numFiles = archive->db.db.NumFiles;
+
+    for (fileIndex = 0; fileIndex < numFiles; fileIndex++)
+    {
+        allocator.Free((char*)archive->files[fileIndex].name);
+    } /* for */
+
     /* Free arrays */
     allocator.Free(archive->folders);
     allocator.Free(archive->files);
@@ -283,29 +291,53 @@ static void sz_archive_exit(SZarchive *archive)
 /*
  * Wrap all 7z calls in this, so the physfs error state is set appropriately.
  */
-static int sz_err(SZ_RESULT rc)
+static int sz_err(SRes rc)
 {
     switch (rc)
     {
-        case SZ_OK: /* Same as LZMA_RESULT_OK */
+        case SZ_OK:
             break;
-        case SZE_DATA_ERROR: /* Same as LZMA_RESULT_DATA_ERROR */
-            PHYSFS_setErrorCode(PHYSFS_ERR_CORRUPT); /*!!!FIXME: was "PHYSFS_ERR_DATA_ERROR" */
-            break;
-        case SZE_OUTOFMEMORY:
-            PHYSFS_setErrorCode(PHYSFS_ERR_OUT_OF_MEMORY);
-            break;
-        case SZE_CRC_ERROR:
+        case SZ_ERROR_DATA:
             PHYSFS_setErrorCode(PHYSFS_ERR_CORRUPT);
             break;
-        case SZE_NOTIMPL:
+        case SZ_ERROR_MEM:
+            PHYSFS_setErrorCode(PHYSFS_ERR_OUT_OF_MEMORY);
+            break;
+        case SZ_ERROR_CRC:
+            PHYSFS_setErrorCode(PHYSFS_ERR_CORRUPT);
+            break;
+        case SZ_ERROR_UNSUPPORTED:
             PHYSFS_setErrorCode(PHYSFS_ERR_UNSUPPORTED);
             break;
-        case SZE_FAIL:
+        case SZ_ERROR_PARAM:
+            PHYSFS_setErrorCode(PHYSFS_ERR_INVALID_ARGUMENT);
+            break;
+        case SZ_ERROR_INPUT_EOF:
+            PHYSFS_setErrorCode(PHYSFS_ERR_PAST_EOF);
+            break;
+        case SZ_ERROR_OUTPUT_EOF:
+            PHYSFS_setErrorCode(PHYSFS_ERR_PAST_EOF);
+            break;
+        case SZ_ERROR_READ:
+            PHYSFS_setErrorCode(PHYSFS_ERR_IO);
+            break;
+        case SZ_ERROR_WRITE:
+            PHYSFS_setErrorCode(PHYSFS_ERR_IO);
+            break;
+        case SZ_ERROR_PROGRESS:
+            PHYSFS_setErrorCode(PHYSFS_ERR_OTHER_ERROR); /* !!! FIXME: right? */
+            break;
+        case SZ_ERROR_FAIL:
             PHYSFS_setErrorCode(PHYSFS_ERR_OTHER_ERROR);  /* !!! FIXME: right? */
             break;
-        case SZE_ARCHIVE_ERROR:
-            PHYSFS_setErrorCode(PHYSFS_ERR_CORRUPT);  /* !!! FIXME: right? */
+        case SZ_ERROR_THREAD:
+            PHYSFS_setErrorCode(PHYSFS_ERR_OTHER_ERROR);  /* !!! FIXME: right? */
+            break;
+        case SZ_ERROR_ARCHIVE:
+            PHYSFS_setErrorCode(PHYSFS_ERR_CORRUPT);
+            break;
+        case SZ_ERROR_NO_ARCHIVE:
+            PHYSFS_setErrorCode(PHYSFS_ERR_OTHER_ERROR); /* !!! FIXME: right? */
             break;
         default:
             PHYSFS_setErrorCode(PHYSFS_ERR_OTHER_ERROR);
@@ -321,7 +353,6 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
 
     size_t wantedSize = (size_t) len;
     const size_t remainingSize = file->item->Size - file->position;
-    size_t fileSize = 0;
 
     BAIL_IF_MACRO(wantedSize == 0, ERRPASS, 0); /* quick rejection. */
     BAIL_IF_MACRO(remainingSize == 0, PHYSFS_ERR_PAST_EOF, 0);
@@ -332,9 +363,10 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
     /* Only decompress the folder if it is not already cached */
     if (file->folder->cache == NULL)
     {
-        const int rc = sz_err(SzExtract(
-            &file->archive->inStream.s, /* compressed data */
+        size_t fileSize = 0;
+        const int rc = sz_err(SzArEx_Extract(
             &file->archive->db, /* 7z's database, containing everything */
+            &file->archive->lookStream.s, /* compressed data */
             file->index, /* Index into database arrays */
             /* Index of cached folder, will be changed by SzExtract */
             &file->folder->index,
@@ -344,12 +376,16 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
             &file->folder->size,
             /* Offset of this file inside the cache, set by SzExtract */
             &file->offset,
-            &fileSize, /* Size of this file */
+            /* Size of this file, set by SzExtract */
+            &fileSize,
             &file->archive->allocImp,
             &file->archive->allocTempImp));
 
         if (rc != SZ_OK)
             return -1;
+
+        BAIL_IF_MACRO(wantedSize > fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
+        BAIL_IF_MACRO(file->item->Size != fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
     } /* if */
 
     /* Copy wanted bytes over from cache to outBuf */
@@ -419,7 +455,8 @@ static void SZ_destroy(PHYSFS_Io *io)
             allocator.Free(file->folder->cache);
             file->folder->cache = NULL;
         }
-        /* !!! FIXME: we don't free (file) or (file->folder)?! */
+
+        /* file and folder are static parts of the archive - keep them around */
     } /* if */
 } /* SZ_destroy */
 
@@ -440,18 +477,11 @@ static const PHYSFS_Io SZ_Io =
 
 static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
 {
-    PHYSFS_uint8 sig[k7zSignatureSize];
     size_t len = 0;
     SZarchive *archive = NULL;
 
-    assert(io != NULL);  /* shouldn't ever happen. */
-
+    BAIL_IF_MACRO(io == NULL, PHYSFS_ERR_INVALID_ARGUMENT, NULL);
     BAIL_IF_MACRO(forWriting, PHYSFS_ERR_READ_ONLY, NULL);
-
-    if (io->read(io, sig, k7zSignatureSize) != k7zSignatureSize)
-        return 0;
-    BAIL_IF_MACRO(!TestSignatureCandidate(sig), PHYSFS_ERR_UNSUPPORTED, NULL);
-    BAIL_IF_MACRO(!io->seek(io, 0), ERRPASS, NULL);
 
     archive = (SZarchive *) allocator.Malloc(sizeof (SZarchive));
     BAIL_IF_MACRO(archive == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
@@ -460,22 +490,33 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     archive->inStream.io = io;
 
     CrcGenerateTable();
-    SzArDbExInit(&archive->db);
-    if (sz_err(SzArchiveOpen(&archive->inStream.s,
-                             &archive->db,
-                             &archive->allocImp,
-                             &archive->allocTempImp)) != SZ_OK)
+
+    SzArEx_Init(&archive->db);
+
+    SRes res = SzArEx_Open(&archive->db,
+                           &archive->lookStream.s,
+                           &archive->allocImp,
+                           &archive->allocTempImp);
+
+    /* Not a 7z archive */
+    if (res == SZ_ERROR_NO_ARCHIVE)
     {
-        SzArDbExFree(&archive->db, sz_free);
+        SzArEx_Free(&archive->db, &archive->allocImp);
+        sz_archive_exit(archive);
+        return NULL;
+    }
+    else if (sz_err(res) != SZ_OK)
+    {
+        SzArEx_Free(&archive->db, &archive->allocImp);
         sz_archive_exit(archive);
         return NULL; /* Error is set by sz_err! */
     } /* if */
 
-    len = archive->db.Database.NumFiles * sizeof (SZfile);
+    len = archive->db.db.NumFiles * sizeof (SZfile);
     archive->files = (SZfile *) allocator.Malloc(len);
     if (archive->files == NULL)
     {
-        SzArDbExFree(&archive->db, sz_free);
+        SzArEx_Free(&archive->db, &archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -486,11 +527,11 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
      */
     memset(archive->files, 0, len);
 
-    len = archive->db.Database.NumFolders * sizeof (SZfolder);
+    len = archive->db.db.NumFolders * sizeof (SZfolder);
     archive->folders = (SZfolder *) allocator.Malloc(len);
     if (archive->folders == NULL)
     {
-        SzArDbExFree(&archive->db, sz_free);
+        SzArEx_Free(&archive->db, &archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -503,7 +544,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
 
     if(!sz_files_init(archive))
     {
-        SzArDbExFree(&archive->db, sz_free);
+        SzArEx_Free(&archive->db, &archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OTHER_ERROR, NULL);
     }
@@ -538,23 +579,24 @@ static void SZ_enumerateFiles(void *opaque, const char *dname,
            dlen_inc = dlen + ((dlen > 0) ? 1 : 0);
     SZarchive *archive = (SZarchive *) opaque;
     SZfile *file = NULL,
-            *lastFile = &archive->files[archive->db.Database.NumFiles];
-        if (dlen)
-        {
-            file = sz_find_file(archive, dname);
-            if (file != NULL) /* if 'file' is NULL it should stay so, otherwise errors will not be handled */
-                file += 1;
-        }
-        else
-        {
-            file = archive->files;
-        }
+           *lastFile = &archive->files[archive->db.db.NumFiles];
+
+    if (dlen)
+    {
+        file = sz_find_file(archive, dname);
+        if (file != NULL) /* if 'file' is NULL it should stay so, otherwise errors will not be handled */
+            file += 1; /* Currently pointing to the directory itself, skip it */
+    }
+    else
+    {
+        file = archive->files;
+    }
 
     BAIL_IF_MACRO(file == NULL, PHYSFS_ERR_NOT_FOUND, );
 
     while (file < lastFile)
     {
-        const char * fname = file->item->Name;
+        const char * fname = file->name;
         const char * dirNameEnd = fname + dlen_inc;
 
         if (strncmp(dname, fname, dlen) != 0) /* Stop after mismatch, archive->files is sorted */
@@ -611,15 +653,7 @@ static void SZ_closeArchive(void *opaque)
 {
     SZarchive *archive = (SZarchive *) opaque;
 
-#if 0  /* !!! FIXME: you shouldn't have to do this. */
-    PHYSFS_uint32 fileIndex = 0, numFiles = archive->db.Database.NumFiles;
-    for (fileIndex = 0; fileIndex < numFiles; fileIndex++)
-    {
-        SZ_fileClose(&archive->files[fileIndex]);
-    } /* for */
-#endif
-
-    SzArDbExFree(&archive->db, sz_free);
+    SzArEx_Free(&archive->db, &archive->allocImp);
     archive->inStream.io->destroy(archive->inStream.io);
     sz_archive_exit(archive);
 } /* SZ_closeArchive */
@@ -644,7 +678,7 @@ static int SZ_stat(void *opaque, const char *filename, PHYSFS_Stat *stat)
     if (!file)
         return 0;
 
-    if(file->item->IsDirectory)
+    if(file->item->IsDir)
     {
         stat->filesize = 0;
         stat->filetype = PHYSFS_FILETYPE_DIRECTORY;
@@ -655,15 +689,14 @@ static int SZ_stat(void *opaque, const char *filename, PHYSFS_Stat *stat)
         stat->filetype = PHYSFS_FILETYPE_REGULAR;
     } /* else */
 
-    /* !!! FIXME: the 0's should be -1's? */
-    if (file->item->IsLastWriteTimeDefined)
-        stat->modtime = sz_filetime_to_unix_timestamp(&file->item->LastWriteTime);
+    if (file->item->MTimeDefined)
+        stat->modtime = sz_filetime_to_unix_timestamp(&file->item->MTime);
     else
-        stat->modtime = 0;
+        stat->modtime = -1;
 
     /* real create and accesstype are currently not in the lzma SDK */
     stat->createtime = stat->modtime;
-    stat->accesstime = 0;
+    stat->accesstime = stat->modtime;
 
     stat->readonly = 1;  /* 7zips are always read only */
 
@@ -695,4 +728,3 @@ const PHYSFS_Archiver __PHYSFS_Archiver_SZ =
 #endif  /* defined PHYSFS_SUPPORTS_7Z */
 
 /* end of archiver_7z.c ... */
-
