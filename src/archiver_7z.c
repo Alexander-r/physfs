@@ -29,7 +29,7 @@ extern int TestSignatureCandidate(Byte *testBytes);
 /*
  * Carries filestream metadata through 7z
  */
-typedef struct _FileInputStream
+typedef struct _SZfileinstream
 {
     ISzAlloc allocImp; /* Allocation implementation, used by 7z */
     ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
@@ -38,7 +38,7 @@ typedef struct _FileInputStream
 #ifdef _LZMA_IN_CB
     Byte buffer[BUFFER_SIZE]; /* Buffer, used by read implementation */
 #endif /* _LZMA_IN_CB */
-} FileInputStream;
+} SZfileinstream;
 
 /*
  * In the 7z format archives are splited into blocks, those are called folders
@@ -61,7 +61,7 @@ typedef struct _SZarchive
     struct _SZfile *files; /* Array of files, size == archive->db.Database.NumFiles */
     SZfolder *folders; /* Array of folders, size == archive->db.Database.NumFolders */
     CArchiveDatabaseEx db; /* For 7z: Database */
-    FileInputStream stream; /* For 7z: Input file incl. read and seek callbacks */
+    SZfileinstream stream; /* For 7z: Input file incl. read and seek callbacks */
 } SZarchive;
 
 /* Set by SZ_openArchive(), except offset which is set by SZ_read() */
@@ -97,12 +97,12 @@ static void sz_free(void *address)
 
 /*
  * Read implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
+ * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
                         size_t *processedSize)
 {
-    FileInputStream *s = (FileInputStream *)(object - offsetof(FileInputStream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)(object - offsetof(SZfileinstream, inStream)); /* HACK! */
     PHYSFS_sint64 processedSizeLoc = 0;
 
     if (maxReqSize > BUFFER_SIZE)
@@ -119,12 +119,12 @@ static SZ_RESULT sz_file_read(void *object, void **buffer, size_t maxReqSize,
 
 /*
  * Read implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
+ * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
                         size_t *processedSize)
 {
-    FileInputStream *s = (FileInputStream *)((unsigned long)object - offsetof(FileInputStream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)((unsigned long)object - offsetof(SZfileinstream, inStream)); /* HACK! */
     const size_t processedSizeLoc = s->io->read(s->io, buffer, size);
     if (processedSize != NULL)
         *processedSize = processedSizeLoc;
@@ -135,11 +135,11 @@ static SZ_RESULT sz_file_read(void *object, void *buffer, size_t size,
 
 /*
  * Seek implementation, to be passed to 7z
- * WARNING: If the ISzInStream in 'object' is not contained in a valid FileInputStream this _will_ break horribly!
+ * WARNING: If the ISzInStream in 'object' is not contained in a valid SZfileinstream this _will_ break horribly!
  */
 static SZ_RESULT sz_file_seek(void *object, CFileSize pos)
 {
-    FileInputStream *s = (FileInputStream *)((unsigned long)object - offsetof(FileInputStream, inStream)); /* HACK! */
+    SZfileinstream *s = (SZfileinstream *)((unsigned long)object - offsetof(SZfileinstream, inStream)); /* HACK! */
     if (s->io->seek(s->io, (PHYSFS_uint64) pos))
         return SZ_OK;
     return SZE_FAIL;
