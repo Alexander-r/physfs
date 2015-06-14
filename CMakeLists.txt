@@ -89,6 +89,21 @@ endif()
 
 # Basic chunks of source code ...
 
+set(LZMA_SRCS
+    lzma938/C/7zArcIn.c
+    lzma938/C/7zCrc.c
+    lzma938/C/7zCrcOpt.c
+    lzma938/C/7zBuf.c
+    lzma938/C/LzmaDec.c
+    lzma938/C/Lzma2Dec.c
+    lzma938/C/7zDec.c
+    lzma938/C/7zStream.c
+    lzma938/C/CpuArch.c
+    lzma938/C/Bra.c
+    lzma938/C/Bra86.c
+    lzma938/C/Bcj2.c
+)
+
 if(BEOS)
     # We add this explicitly, since we don't want CMake to think this
     #  is a C++ project unless we're on BeOS.
@@ -210,20 +225,21 @@ endif()
 option(PHYSFS_ARCHIVE_7Z "Enable 7zip support" TRUE)
 if(PHYSFS_ARCHIVE_7Z)
     add_definitions(-DPHYSFS_SUPPORTS_7Z=1)
-
+    include_directories(lzma938/C)
+    set(PHYSFS_SRCS ${PHYSFS_SRCS} ${LZMA_SRCS})
     set(PHYSFS_INTERNAL_LZMA TRUE)
-    if(PHYSFS_INTERNAL_LZMA)
-        add_definitions(-D_7ZIP_ST)
-        include_directories(lzma920)
-
-        file(GLOB LZMA_SRCS lzma920/lzma/C/*.c)
-        file(GLOB LZMA_SRCS_NOT lzma920/lzma/C/LzFindMt.c lzma920/lzma/C/MtCoder.c lzma920/lzma/C/Threads.c)
-        list(REMOVE_ITEM LZMA_SRCS ${LZMA_SRCS_NOT})
-
-        add_library(lzma920 STATIC ${LZMA_SRCS})
-        set_property(TARGET lzma920 PROPERTY COMPILE_FLAGS "-Wno-error -fPIC")
-        set(OPTIONAL_LIBRARY_LIBS ${OPTIONAL_LIBRARY_LIBS} lzma920)
-    endif()
+#    if(PHYSFS_INTERNAL_LZMA)
+#        add_definitions(-D_7ZIP_ST)
+#        include_directories(lzma938)
+#
+#        file(GLOB LZMA_SRCS lzma938/lzma/C/*.c)
+#        file(GLOB LZMA_SRCS_NOT lzma938/lzma/C/LzFindMt.c lzma938/lzma/C/MtCoder.c lzma938/lzma/C/Threads.c)
+#        list(REMOVE_ITEM LZMA_SRCS ${LZMA_SRCS_NOT})
+#
+#        add_library(lzma938 STATIC ${LZMA_SRCS})
+#        set_property(TARGET lzma938 PROPERTY COMPILE_FLAGS "-Wno-error -fPIC")
+#        set(OPTIONAL_LIBRARY_LIBS ${OPTIONAL_LIBRARY_LIBS} lzma938)
+#    endif()
 endif()
 
 option(PHYSFS_ARCHIVE_GRP "Enable Build Engine GRP support" TRUE)
