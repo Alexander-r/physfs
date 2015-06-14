@@ -89,20 +89,6 @@ endif()
 
 # Basic chunks of source code ...
 
-set(LZMA_SRCS
-    src/lzma/C/7zCrc.c
-    src/lzma/C/Archive/7z/7zBuffer.c
-    src/lzma/C/Archive/7z/7zDecode.c
-    src/lzma/C/Archive/7z/7zExtract.c
-    src/lzma/C/Archive/7z/7zHeader.c
-    src/lzma/C/Archive/7z/7zIn.c
-    src/lzma/C/Archive/7z/7zItem.c
-    src/lzma/C/Archive/7z/7zMethodID.c
-    src/lzma/C/Compress/Branch/BranchX86.c
-    src/lzma/C/Compress/Branch/BranchX86_2.c
-    src/lzma/C/Compress/Lzma/LzmaDecode.c
-)
-
 if(BEOS)
     # We add this explicitly, since we don't want CMake to think this
     #  is a C++ project unless we're on BeOS.
@@ -128,7 +114,7 @@ set(PHYSFS_SRCS
     src/archiver_unpacked.c
     src/archiver_grp.c
     src/archiver_hog.c
-    src/archiver_lzma.c
+    src/archiver_7z.c
     src/archiver_mvl.c
     src/archiver_qpak.c
     src/archiver_wad.c
@@ -224,8 +210,20 @@ endif()
 option(PHYSFS_ARCHIVE_7Z "Enable 7zip support" TRUE)
 if(PHYSFS_ARCHIVE_7Z)
     add_definitions(-DPHYSFS_SUPPORTS_7Z=1)
-    # !!! FIXME: rename to 7z.c?
-    set(PHYSFS_SRCS ${PHYSFS_SRCS} ${LZMA_SRCS})
+
+    set(PHYSFS_INTERNAL_LZMA TRUE)
+    if(PHYSFS_INTERNAL_LZMA)
+        add_definitions(-D_7ZIP_ST)
+        include_directories(lzma920)
+
+        file(GLOB LZMA_SRCS lzma920/lzma/C/*.c)
+        file(GLOB LZMA_SRCS_NOT lzma920/lzma/C/LzFindMt.c lzma920/lzma/C/MtCoder.c lzma920/lzma/C/Threads.c)
+        list(REMOVE_ITEM LZMA_SRCS ${LZMA_SRCS_NOT})
+
+        add_library(lzma920 STATIC ${LZMA_SRCS})
+        set_property(TARGET lzma920 PROPERTY COMPILE_FLAGS "-Wno-error -fPIC")
+        set(OPTIONAL_LIBRARY_LIBS ${OPTIONAL_LIBRARY_LIBS} lzma920)
+    endif()
 endif()
 
 option(PHYSFS_ARCHIVE_GRP "Enable Build Engine GRP support" TRUE)
