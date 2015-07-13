@@ -15,24 +15,26 @@ DEFINES += PHYSFS_SUPPORTS_QPAK=1
 DEFINES += PHYSFS_SUPPORTS_SLB=1
 DEFINES += PHYSFS_SUPPORTS_ISO9660=1
 
-INCLUDEPATH += $$PWD/lzma938/C
+INCLUDEPATH += $$PWD/lzma1505/C
 INCLUDEPATH += $$PWD/src 
 INCLUDEPATH += /usr/include
 
 SOURCES += \
     test/test_physfs.c \
-    lzma938/C/7zArcIn.c \
-    lzma938/C/7zCrc.c \
-    lzma938/C/7zCrcOpt.c \
-    lzma938/C/7zBuf.c \
-    lzma938/C/LzmaDec.c \
-    lzma938/C/Lzma2Dec.c \
-    lzma938/C/7zDec.c \
-    lzma938/C/7zStream.c \
-    lzma938/C/CpuArch.c \
-    lzma938/C/Bra.c \
-    lzma938/C/Bra86.c \
-    lzma938/C/Bcj2.c \
+    lzma1505/C/7zArcIn.c \
+    lzma1505/C/7zCrc.c \
+    lzma1505/C/7zCrcOpt.c \
+    lzma1505/C/7zBuf.c \
+    lzma1505/C/Delta.c \
+    lzma1505/C/LzmaDec.c \
+    lzma1505/C/Lzma2Dec.c \
+    lzma1505/C/7zDec.c \
+    lzma1505/C/7zStream.c \
+    lzma1505/C/CpuArch.c \
+    lzma1505/C/Bra.c \
+    lzma1505/C/Bra86.c \
+    lzma1505/C/BraIA64.c \
+    lzma1505/C/Bcj2.c \
     src/archiver_7z.c \
     src/platform_beos.cpp \
     src/platform_winrt.cpp \
