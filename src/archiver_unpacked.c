@@ -79,7 +79,7 @@ static int UNPK_seek(PHYSFS_Io *io, PHYSFS_uint64 offset)
     const UNPKentry *entry = finfo->entry;
     int rc;
 
-    BAIL_IF_MACRO(offset >= entry->size, PHYSFS_ERR_PAST_EOF, 0);
+    BAIL_IF_MACRO(offset > entry->size, PHYSFS_ERR_PAST_EOF, 0);
     rc = finfo->io->seek(finfo->io, entry->startPos + offset);
     if (rc)
         finfo->curPos = (PHYSFS_uint32) offset;
