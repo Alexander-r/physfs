@@ -90,20 +90,20 @@ endif()
 # Basic chunks of source code ...
 
 set(LZMA_SRCS
-    lzma1505/C/7zArcIn.c
-    lzma1505/C/7zCrc.c
-    lzma1505/C/7zCrcOpt.c
-    lzma1505/C/7zBuf.c
-    lzma1505/C/Delta.c
-    lzma1505/C/LzmaDec.c
-    lzma1505/C/Lzma2Dec.c
-    lzma1505/C/7zDec.c
-    lzma1505/C/7zStream.c
-    lzma1505/C/CpuArch.c
-    lzma1505/C/Bra.c
-    lzma1505/C/Bra86.c
-    lzma1505/C/BraIA64.c
-    lzma1505/C/Bcj2.c
+    lzma/C/7zArcIn.c
+    lzma/C/7zCrc.c
+    lzma/C/7zCrcOpt.c
+    lzma/C/7zBuf.c
+    lzma/C/Delta.c
+    lzma/C/LzmaDec.c
+    lzma/C/Lzma2Dec.c
+    lzma/C/7zDec.c
+    lzma/C/7zStream.c
+    lzma/C/CpuArch.c
+    lzma/C/Bra.c
+    lzma/C/Bra86.c
+    lzma/C/BraIA64.c
+    lzma/C/Bcj2.c
 )
 
 if(BEOS)
@@ -227,20 +227,20 @@ endif()
 option(PHYSFS_ARCHIVE_7Z "Enable 7zip support" TRUE)
 if(PHYSFS_ARCHIVE_7Z)
     add_definitions(-DPHYSFS_SUPPORTS_7Z=1)
-    include_directories(lzma1505/C)
+    include_directories(lzma/C)
     set(PHYSFS_SRCS ${PHYSFS_SRCS} ${LZMA_SRCS})
     set(PHYSFS_INTERNAL_LZMA TRUE)
 #    if(PHYSFS_INTERNAL_LZMA)
 #        add_definitions(-D_7ZIP_ST)
-#        include_directories(lzma1505)
+#        include_directories(lzma)
 #
-#        file(GLOB LZMA_SRCS lzma1505/lzma/C/*.c)
-#        file(GLOB LZMA_SRCS_NOT lzma1505/lzma/C/LzFindMt.c lzma1505/lzma/C/MtCoder.c lzma1505/lzma/C/Threads.c)
+#        file(GLOB LZMA_SRCS lzma/lzma/C/*.c)
+#        file(GLOB LZMA_SRCS_NOT lzma/lzma/C/LzFindMt.c lzma/lzma/C/MtCoder.c lzma/lzma/C/Threads.c)
 #        list(REMOVE_ITEM LZMA_SRCS ${LZMA_SRCS_NOT})
 #
-#        add_library(lzma1505 STATIC ${LZMA_SRCS})
-#        set_property(TARGET lzma1505 PROPERTY COMPILE_FLAGS "-Wno-error -fPIC")
-#        set(OPTIONAL_LIBRARY_LIBS ${OPTIONAL_LIBRARY_LIBS} lzma1505)
+#        add_library(lzma STATIC ${LZMA_SRCS})
+#        set_property(TARGET lzma PROPERTY COMPILE_FLAGS "-Wno-error -fPIC")
+#        set(OPTIONAL_LIBRARY_LIBS ${OPTIONAL_LIBRARY_LIBS} lzma)
 #    endif()
 endif()
 
