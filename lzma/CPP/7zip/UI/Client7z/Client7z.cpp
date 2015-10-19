@@ -309,7 +309,7 @@ STDMETHODIMP CArchiveExtractCallback::GetStream(UInt32 index,
     NCOM::CPropVariant prop;
     RINOK(_archiveHandler->GetProperty(index, kpidMTime, &prop));
     _processedFileInfo.MTimeDefined = false;
-    switch(prop.vt)
+    switch (prop.vt)
     {
       case VT_EMPTY:
         // _processedFileInfo.MTime = _utcMTimeDefault;
@@ -441,7 +441,7 @@ STDMETHODIMP CArchiveExtractCallback::SetOperationResult(Int32 operationResult)
     }
   }
 
-  if (_outFileStream != NULL)
+  if (_outFileStream)
   {
     if (_processedFileInfo.MTimeDefined)
       _outFileStreamSpec->SetMTime(&_processedFileInfo.MTime);
@@ -499,7 +499,6 @@ public:
   STDMETHOD(SetCompleted)(const UInt64 *completeValue);
 
   // IUpdateCallback2
-  STDMETHOD(EnumProperties)(IEnumSTATPROPSTG **enumerator);
   STDMETHOD(GetUpdateItemInfo)(UInt32 index,
       Int32 *newData, Int32 *newProperties, UInt32 *indexInArchive);
   STDMETHOD(GetProperty)(UInt32 index, PROPID propID, PROPVARIANT *value);
@@ -551,20 +550,14 @@ STDMETHODIMP CArchiveUpdateCallback::SetCompleted(const UInt64 * /* completeValu
   return S_OK;
 }
 
-
-STDMETHODIMP CArchiveUpdateCallback::EnumProperties(IEnumSTATPROPSTG ** /* enumerator */)
-{
-  return E_NOTIMPL;
-}
-
 STDMETHODIMP CArchiveUpdateCallback::GetUpdateItemInfo(UInt32 /* index */,
       Int32 *newData, Int32 *newProperties, UInt32 *indexInArchive)
 {
-  if (newData != NULL)
+  if (newData)
     *newData = BoolToInt(true);
-  if (newProperties != NULL)
+  if (newProperties)
     *newProperties = BoolToInt(true);
-  if (indexInArchive != NULL)
+  if (indexInArchive)
     *indexInArchive = (UInt32)(Int32)-1;
   return S_OK;
 }
@@ -582,7 +575,7 @@ STDMETHODIMP CArchiveUpdateCallback::GetProperty(UInt32 index, PROPID propID, PR
 
   {
     const CDirItem &dirItem = (*DirItems)[index];
-    switch(propID)
+    switch (propID)
     {
       case kpidPath:  prop = dirItem.Name; break;
       case kpidIsDir:  prop = dirItem.isDir(); break;
