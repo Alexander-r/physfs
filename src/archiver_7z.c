@@ -217,7 +217,7 @@ static SZfile * sz_find_file(const SZarchive *archive, const char *name)
 static int sz_file_init(SZarchive *archive, PHYSFS_uint32 fileIndex)
 {
     SZfile *file = &archive->files[fileIndex];
-    PHYSFS_uint32 folderIndex = archive->db.FileIndexToFolderIndexMap[fileIndex];
+    PHYSFS_uint32 folderIndex = archive->db.FileToFolder[fileIndex];
 
     file->index = fileIndex; /* Store index into 7z array, since we sort our own. */
     file->archive = archive;
