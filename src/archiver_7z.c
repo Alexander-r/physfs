@@ -752,7 +752,7 @@ const PHYSFS_Archiver __PHYSFS_Archiver_SZ =
         "SZ",
         "7Zip format",
         "Dennis Schridde <devurandom@gmx.net>",
-        "http://icculus.org/physfs/",
+        "https://icculus.org/physfs/",
         0,  /* supportsSymlinks */
     },
     SZ_openArchive,
