@@ -701,6 +701,7 @@ PHYSFS_DECL const char *PHYSFS_getErrorByCode(PHYSFS_ErrorCode code)
         case PHYSFS_ERR_DIR_NOT_EMPTY: return "directory isn't empty";
         case PHYSFS_ERR_OS_ERROR: return "OS reported an error";
         case PHYSFS_ERR_DUPLICATE: return "duplicate resource";
+        case PHYSFS_ERR_BAD_PASSWORD: return "bad password";
     } /* switch */
 
     return NULL;  /* don't know this error code. */
@@ -1286,8 +1287,6 @@ static void freeArchivers(void)
 
 static int doDeinit(void)
 {
-    BAIL_IF_MACRO(!__PHYSFS_platformDeinit(), ERRPASS, 0);
-
     closeFileHandleList(&openWriteList);
     BAIL_IF_MACRO(!PHYSFS_setWriteDir(NULL), PHYSFS_ERR_FILES_STILL_OPEN, 0);
 
@@ -1335,6 +1334,10 @@ static int doDeinit(void)
         allocator.Deinit();
 
     errorLock = stateLock = NULL;
+
+    /* !!! FIXME: what on earth are you supposed to do if this fails? */
+    BAIL_IF_MACRO(!__PHYSFS_platformDeinit(), ERRPASS, 0);
+
     return 1;
 } /* doDeinit */
 
