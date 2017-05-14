@@ -16,6 +16,8 @@
 #include "7zFile.h"
 #include "7zCrc.h"
 
+#define kInputBufSize ((size_t)1 << 18)
+
 /*
  * Carries filestream metadata through 7z
  */
@@ -46,7 +48,7 @@ typedef struct _SZarchive
     CSzArEx db; /* For 7z: Database */
     ISzAlloc allocImp; /* Allocation implementation, used by 7z */
     ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
-    CLookToRead lookStream; /* Input stream wrapper with read callbacks, used by 7z */
+    CLookToRead2 lookStream; /* Input stream wrapper with read callbacks, used by 7z */
     SZfileinstream inStream; /* Input stream with read callbacks, used by 7z */
     struct _SZfile *files; /* Array of files, size == archive->db.Database.NumFiles */
     SZfolder *folders; /* Array of folders, size == archive->db.Database.NumFolders */
@@ -84,14 +86,14 @@ typedef struct _SZfile
 
 /* Memory management implementations to be passed to 7z */
 
-static void *sz_alloc(void *p, size_t size)
+static void *sz_alloc(ISzAllocPtr p, size_t size)
 {
     (void)p;
     return ((size == 0) ? NULL : allocator.Malloc(size));
 } /* sz_alloc */
 
 
-static void sz_free(void *p, void *address)
+static void sz_free(ISzAllocPtr p, void *address)
 {
     (void)p;
     if (address != NULL)
@@ -104,7 +106,7 @@ static void sz_free(void *p, void *address)
 /*
  * Read implementation, to be passed to 7z
  */
-static SRes sz_file_read(void *object, void *buffer, size_t *size)
+static SRes sz_file_read(const ISeekInStream *object, void *buffer, size_t *size)
 {
     BAIL_IF_MACRO(size == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
@@ -119,7 +121,7 @@ static SRes sz_file_read(void *object, void *buffer, size_t *size)
 /*
  * Seek implementation, to be passed to 7z
  */
-static SRes sz_file_seek(void *object, Int64 *pos, ESzSeek origin)
+static SRes sz_file_seek(const ISeekInStream *object, Int64 *pos, ESzSeek origin)
 {
     BAIL_IF_MACRO(pos == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
@@ -293,9 +295,15 @@ static void sz_archive_init(SZarchive *archive)
     archive->inStream.s.Seek = sz_file_seek;
 
     /* Prepare input wrapper callbacks for 7z */
-    LookToRead_CreateVTable(&archive->lookStream, False);
-    archive->lookStream.realStream = &archive->inStream.s;
-    LookToRead_Init(&archive->lookStream);
+    LookToRead2_CreateVTable(&archive->lookStream, False);
+    archive->lookStream.buf = NULL;
+    archive->lookStream.buf = ISzAlloc_Alloc(&archive->allocImp, kInputBufSize);
+    if (archive->lookStream.buf)
+    {
+      archive->lookStream.bufSize = kInputBufSize;
+      archive->lookStream.realStream = &archive->inStream.s;
+      LookToRead2_Init(&archive->lookStream);
+    }
 } /* sz_archive_init */
 
 
@@ -396,7 +404,7 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
         size_t fileSize = 0;
         const int rc = sz_err(SzArEx_Extract(
             &file->archive->db, /* 7z's database, containing everything */
-            &file->archive->lookStream.s, /* compressed data */
+            &file->archive->lookStream.vt, /* compressed data */
             file->index, /* Index into database arrays */
             /* Index of cached folder, will be changed by SzExtract */
             &file->folder->index,
@@ -524,7 +532,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     SzArEx_Init(&archive->db);
 
     SRes res = SzArEx_Open(&archive->db,
-                           &archive->lookStream.s,
+                           &archive->lookStream.vt,
                            &archive->allocImp,
                            &archive->allocTempImp);
 
@@ -749,7 +757,7 @@ const PHYSFS_Archiver __PHYSFS_Archiver_SZ =
 {
     CURRENT_PHYSFS_ARCHIVER_API_VERSION,
     {
-        "SZ",
+        "7z",
         "7Zip format",
         "Dennis Schridde <devurandom@gmx.net>",
         "https://icculus.org/physfs/",
