@@ -46,8 +46,8 @@ typedef struct _SZfolder
 typedef struct _SZarchive
 {
     CSzArEx db; /* For 7z: Database */
-    ISzAlloc allocImp; /* Allocation implementation, used by 7z */
-    ISzAlloc allocTempImp; /* Temporary allocation implementation, used by 7z */
+    ISzAllocPtr allocImp; /* Allocation implementation, used by 7z */
+    ISzAllocPtr allocTempImp; /* Temporary allocation implementation, used by 7z */
     CLookToRead2 lookStream; /* Input stream wrapper with read callbacks, used by 7z */
     SZfileinstream inStream; /* Input stream with read callbacks, used by 7z */
     struct _SZfile *files; /* Array of files, size == archive->db.Database.NumFiles */
@@ -100,6 +100,7 @@ static void sz_free(ISzAllocPtr p, void *address)
         allocator.Free(address);
 } /* sz_free */
 
+static const ISzAlloc g_Alloc = { sz_alloc, sz_free };
 
 /* Filesystem implementations to be passed to 7z */
 
@@ -285,11 +286,9 @@ static void sz_archive_init(SZarchive *archive)
     memset(archive, 0, sizeof(*archive));
 
     /* Prepare callbacks for 7z */
-    archive->allocImp.Alloc = sz_alloc;
-    archive->allocImp.Free = sz_free;
+    archive->allocImp = &g_Alloc;
 
-    archive->allocTempImp.Alloc = sz_alloc;
-    archive->allocTempImp.Free = sz_free;
+    archive->allocTempImp = &g_Alloc;
 
     archive->inStream.s.Read = sz_file_read;
     archive->inStream.s.Seek = sz_file_seek;
@@ -297,7 +296,7 @@ static void sz_archive_init(SZarchive *archive)
     /* Prepare input wrapper callbacks for 7z */
     LookToRead2_CreateVTable(&archive->lookStream, False);
     archive->lookStream.buf = NULL;
-    archive->lookStream.buf = ISzAlloc_Alloc(&archive->allocImp, kInputBufSize);
+    archive->lookStream.buf = ISzAlloc_Alloc(archive->allocImp, kInputBufSize);
     if (archive->lookStream.buf)
     {
       archive->lookStream.bufSize = kInputBufSize;
@@ -416,8 +415,8 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
             &file->offset,
             /* Size of this file, set by SzExtract */
             &fileSize,
-            &file->archive->allocImp,
-            &file->archive->allocTempImp));
+            file->archive->allocImp,
+            file->archive->allocTempImp));
 
         if (rc != SZ_OK)
             return -1;
@@ -533,19 +532,19 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
 
     SRes res = SzArEx_Open(&archive->db,
                            &archive->lookStream.vt,
-                           &archive->allocImp,
-                           &archive->allocTempImp);
+                           archive->allocImp,
+                           archive->allocTempImp);
 
     /* Not a 7z archive */
     if (res == SZ_ERROR_NO_ARCHIVE)
     {
-        SzArEx_Free(&archive->db, &archive->allocImp);
+        SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
         return NULL;
     }
     else if (sz_err(res) != SZ_OK)
     {
-        SzArEx_Free(&archive->db, &archive->allocImp);
+        SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
         return NULL; /* Error is set by sz_err! */
     } /* if */
@@ -554,7 +553,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     archive->files = (SZfile *) allocator.Malloc(len);
     if (archive->files == NULL)
     {
-        SzArEx_Free(&archive->db, &archive->allocImp);
+        SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -569,7 +568,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     archive->folders = (SZfolder *) allocator.Malloc(len);
     if (archive->folders == NULL)
     {
-        SzArEx_Free(&archive->db, &archive->allocImp);
+        SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
@@ -582,7 +581,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
 
     if(!sz_files_init(archive))
     {
-        SzArEx_Free(&archive->db, &archive->allocImp);
+        SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
         BAIL_MACRO(PHYSFS_ERR_OTHER_ERROR, NULL);
     }
@@ -702,7 +701,7 @@ static void SZ_closeArchive(void *opaque)
         allocator.Free(archive->files[fileIndex].item);
     }
 
-    SzArEx_Free(&archive->db, &archive->allocImp);
+    SzArEx_Free(&archive->db, archive->allocImp);
     archive->inStream.io->destroy(archive->inStream.io);
     sz_archive_exit(archive);
 } /* SZ_closeArchive */
