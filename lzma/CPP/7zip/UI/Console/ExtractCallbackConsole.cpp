@@ -95,6 +95,16 @@ void PrintSize_bytes_Smart(AString &s, UInt64 val)
   s += ')';
 }
 
+void PrintSize_bytes_Smart_comma(AString &s, UInt64 val)
+{
+  if (val == (UInt64)(Int64)-1)
+    return;
+  s += ", ";
+  PrintSize_bytes_Smart(s, val);
+}
+
+
+
 void Print_DirItemsStat(AString &s, const CDirItemsStat &st)
 {
   if (st.NumDirs != 0)
@@ -103,16 +113,47 @@ void Print_DirItemsStat(AString &s, const CDirItemsStat &st)
     s += ", ";
   }
   Print_UInt64_and_String(s, st.NumFiles, st.NumFiles == 1 ? "file" : "files");
-  s += ", ";
-  PrintSize_bytes_Smart(s, st.FilesSize);
+  PrintSize_bytes_Smart_comma(s, st.FilesSize);
   if (st.NumAltStreams != 0)
   {
     s.Add_LF();
     Print_UInt64_and_String(s, st.NumAltStreams, "alternate streams");
-    s += ", ";
-    PrintSize_bytes_Smart(s, st.AltStreamsSize);
+    PrintSize_bytes_Smart_comma(s, st.AltStreamsSize);
   }
 }
+
+
+void Print_DirItemsStat2(AString &s, const CDirItemsStat2 &st)
+{
+  Print_DirItemsStat(s, (CDirItemsStat &)st);
+  bool needLF = true;
+  if (st.Anti_NumDirs != 0)
+  {
+    if (needLF)
+      s.Add_LF();
+    needLF = false;
+    Print_UInt64_and_String(s, st.Anti_NumDirs, st.Anti_NumDirs == 1 ? "anti-folder" : "anti-folders");
+  }
+  if (st.Anti_NumFiles != 0)
+  {
+    if (needLF)
+      s.Add_LF();
+    else
+      s += ", ";
+    needLF = false;
+    Print_UInt64_and_String(s, st.Anti_NumFiles, st.Anti_NumFiles == 1 ? "anti-file" : "anti-files");
+  }
+  if (st.Anti_NumAltStreams != 0)
+  {
+    if (needLF)
+      s.Add_LF();
+    else
+      s += ", ";
+    needLF = false;
+    Print_UInt64_and_String(s, st.Anti_NumAltStreams, "anti-alternate-streams");
+  }
+}
+
 
 void CExtractScanConsole::PrintStat(const CDirItemsStat &st)
 {
@@ -211,7 +252,7 @@ static const char * const kTab = "  ";
 static void PrintFileInfo(CStdOutStream *_so, const wchar_t *path, const FILETIME *ft, const UInt64 *size)
 {
   *_so << kTab << "Path:     " << path << endl;
-  if (size)
+  if (size && *size != (UInt64)(Int64)-1)
   {
     AString s;
     PrintSize_bytes_Smart(s, *size);

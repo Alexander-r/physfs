@@ -5,4 +5,4 @@ PhysicsFS; a portable, flexible file i/o abstraction.
 
 Please see the docs directory for documentation, licensing, and information.
 
-This fork was updated to use the new LZMA SDK (16.04).
+This fork was updated to use the new LZMA SDK (18.01).

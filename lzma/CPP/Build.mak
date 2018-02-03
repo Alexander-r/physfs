@@ -15,11 +15,11 @@ O=O
 !ENDIF
 
 !IF "$(CPU)" == "AMD64"
-MY_ML = ml64 -Dx64
+MY_ML = ml64 -Dx64 -WX
 !ELSEIF "$(CPU)" == "ARM"
-MY_ML = armasm
+MY_ML = armasm -WX
 !ELSE
-MY_ML = ml
+MY_ML = ml -WX
 !ENDIF
 
 
@@ -32,7 +32,9 @@ LFLAGS = $(LFLAGS) /ENTRY:mainACRTStartup
 !IFNDEF NEW_COMPILER
 LFLAGS = $(LFLAGS) -OPT:NOWIN98
 !ENDIF
+!IF "$(CPU)" != "ARM" && "$(CPU)" != "ARM64"
 CFLAGS = $(CFLAGS) -Gr
+!ENDIF
 LIBS = $(LIBS) user32.lib advapi32.lib shell32.lib
 !ENDIF
 
@@ -80,7 +82,9 @@ LFLAGS = $(LFLAGS) /LARGEADDRESSAWARE
 !IFDEF DEF_FILE
 LFLAGS = $(LFLAGS) -DLL -DEF:$(DEF_FILE)
 !ELSE
+!IF "$(CPU)" != "ARM" && "$(CPU)" != "ARM64"
 LFLAGS = $(LFLAGS) /FIXED
+!ENDIF
 # /BASE:0x400000
 !ENDIF
 

@@ -657,38 +657,74 @@ static HRESULT Compress(
     FOR_VECTOR (i, updatePairs2)
     {
       const CUpdatePair2 &up = updatePairs2[i];
-      if (up.NewData)
+
+      // 17.01: anti-item is (up.NewData && (p.UseArcProps in most cases))
+
+      if (up.NewData && !up.UseArcProps)
       {
-        CDirItemsStat &stat = stat2.NewData;
-        const CDirItem &di = dirItems.Items[up.DirIndex];
-        if (di.IsDir())
-          stat.NumDirs++;
-        else if (di.IsAltStream)
+        if (up.ExistOnDisk())
         {
-          stat.NumAltStreams++;
-          stat.AltStreamsSize += di.Size;
-        }
-        else
-        {
-          stat.NumFiles++;
-          stat.FilesSize += di.Size;
+          CDirItemsStat2 &stat = stat2.NewData;
+          const CDirItem &di = dirItems.Items[up.DirIndex];
+          if (di.IsDir())
+          {
+            if (up.IsAnti)
+              stat.Anti_NumDirs++;
+            else
+              stat.NumDirs++;
+          }
+          else if (di.IsAltStream)
+          {
+            if (up.IsAnti)
+              stat.Anti_NumAltStreams++;
+            else
+            {
+              stat.NumAltStreams++;
+              stat.AltStreamsSize += di.Size;
+            }
+          }
+          else
+          {
+            if (up.IsAnti)
+              stat.Anti_NumFiles++;
+            else
+            {
+              stat.NumFiles++;
+              stat.FilesSize += di.Size;
+            }
+          }
         }
       }
       else if (up.ArcIndex >= 0)
       {
-        CDirItemsStat &stat = stat2.OldData;
+        CDirItemsStat2 &stat = *(up.NewData ? &stat2.NewData : &stat2.OldData);
         const CArcItem &ai = arcItems[up.ArcIndex];
         if (ai.IsDir)
-          stat.NumDirs++;
+        {
+          if (up.IsAnti)
+            stat.Anti_NumDirs++;
+          else
+            stat.NumDirs++;
+        }
         else if (ai.IsAltStream)
         {
-          stat.NumAltStreams++;
-          stat.AltStreamsSize += ai.Size;
+          if (up.IsAnti)
+            stat.Anti_NumAltStreams++;
+          else
+          {
+            stat.NumAltStreams++;
+            stat.AltStreamsSize += ai.Size;
+          }
         }
         else
         {
-          stat.NumFiles++;
-          stat.FilesSize += ai.Size;
+          if (up.IsAnti)
+            stat.Anti_NumFiles++;
+          else
+          {
+            stat.NumFiles++;
+            stat.FilesSize += ai.Size;
+          }
         }
       }
     }
@@ -699,6 +735,7 @@ static HRESULT Compress(
   CMyComPtr<IArchiveUpdateCallback> updateCallback(updateCallbackSpec);
   
   updateCallbackSpec->ShareForWrite = options.OpenShareForWrite;
+  updateCallbackSpec->StopAfterOpenError = options.StopAfterOpenError;
   updateCallbackSpec->StdInMode = options.StdInMode;
   updateCallbackSpec->Callback = callback;
 
@@ -1009,32 +1046,6 @@ static HRESULT EnumerateInArchiveItems(
 
 #endif
 
-struct CRefSortPair
-{
-  unsigned Len;
-  unsigned Index;
-};
-
-#define RINOZ(x) { int __tt = (x); if (__tt != 0) return __tt; }
-
-static int CompareRefSortPair(const CRefSortPair *a1, const CRefSortPair *a2, void *)
-{
-  RINOZ(-MyCompare(a1->Len, a2->Len));
-  return MyCompare(a1->Index, a2->Index);
-}
-
-static unsigned GetNumSlashes(const FChar *s)
-{
-  for (unsigned numSlashes = 0;;)
-  {
-    FChar c = *s++;
-    if (c == 0)
-      return numSlashes;
-    if (IS_PATH_SEPAR(c))
-      numSlashes++;
-  }
-}
-
 #ifdef _WIN32
 void ConvertToLongNames(NWildcard::CCensor &censor);
 #endif
@@ -1153,6 +1164,16 @@ HRESULT UpdateArchive(
         throw "there is no such archive";
       if (fi.IsDevice)
         return E_NOTIMPL;
+
+      if (!options.StdOutMode && options.UpdateArchiveItself)
+        if (fi.IsReadOnly())
+        {
+          errorInfo.SystemError = ERROR_ACCESS_DENIED;
+          errorInfo.Message = "The file is read-only";
+          errorInfo.FileNames.Add(arcPath);
+          return errorInfo.Get_HRESULT_Error();
+        }
+
       if (options.VolumesSizes.Size() > 0)
       {
         errorInfo.FileNames.Add(us2fs(arcPath));
@@ -1473,9 +1494,13 @@ HRESULT UpdateArchive(
       CArchivePath &ap = options.Commands[0].ArchivePath;
       const FString &tempPath = ap.GetTempPath();
       
+      // DWORD attrib = 0;
       if (thereIsInArchive)
+      {
+        // attrib = NFind::GetFileAttrib(us2fs(arcPath));
         if (!DeleteFileAlways(us2fs(arcPath)))
           return errorInfo.SetFromLastError("cannot delete the file", us2fs(arcPath));
+      }
       
       if (!MyMoveFile(tempPath, us2fs(arcPath)))
       {
@@ -1483,6 +1508,15 @@ HRESULT UpdateArchive(
         errorInfo.FileNames.Add(us2fs(arcPath));
         return errorInfo.Get_HRESULT_Error();
       }
+      
+      /*
+      if (attrib != INVALID_FILE_ATTRIBUTES && (attrib & FILE_ATTRIBUTE_READONLY))
+      {
+        DWORD attrib2 = NFind::GetFileAttrib(us2fs(arcPath));
+        if (attrib2 != INVALID_FILE_ATTRIBUTES)
+          NDir::SetFileAttrib(us2fs(arcPath), attrib2 | FILE_ATTRIBUTE_READONLY);
+      }
+      */
     }
     catch(...)
     {
@@ -1572,7 +1606,7 @@ HRESULT UpdateArchive(
 
   if (options.DeleteAfterCompressing)
   {
-    CRecordVector<CRefSortPair> pairs;
+    CRecordVector<CDirPathSortPair> pairs;
     FStringVector foldersNames;
 
     unsigned i;
@@ -1580,20 +1614,30 @@ HRESULT UpdateArchive(
     for (i = 0; i < dirItems.Items.Size(); i++)
     {
       const CDirItem &dirItem = dirItems.Items[i];
-      FString phyPath = dirItems.GetPhyPath(i);
+      const FString phyPath = dirItems.GetPhyPath(i);
       if (dirItem.IsDir())
       {
-        CRefSortPair pair;
+        CDirPathSortPair pair;
         pair.Index = i;
-        pair.Len = GetNumSlashes(phyPath);
+        pair.SetNumSlashes(phyPath);
         pairs.Add(pair);
       }
       else
       {
         if (processedItems[i] != 0 || dirItem.Size == 0)
         {
-          RINOK(callback->DeletingAfterArchiving(phyPath, false));
-          DeleteFileAlways(phyPath);
+          NFind::CFileInfo fileInfo;
+          if (fileInfo.Find(phyPath))
+          {
+            // maybe we must exclude also files with archive name: "a a.7z * -sdel"
+            if (fileInfo.Size == dirItem.Size
+                && CompareFileTime(&fileInfo.MTime, &dirItem.MTime) == 0
+                && CompareFileTime(&fileInfo.CTime, &dirItem.CTime) == 0)
+            {
+              RINOK(callback->DeletingAfterArchiving(phyPath, false));
+              DeleteFileAlways(phyPath);
+            }
+          }
         }
         else
         {
@@ -1608,11 +1652,11 @@ HRESULT UpdateArchive(
       }
     }
 
-    pairs.Sort(CompareRefSortPair, NULL);
+    pairs.Sort2();
     
     for (i = 0; i < pairs.Size(); i++)
     {
-      FString phyPath = dirItems.GetPhyPath(pairs[i].Index);
+      const FString phyPath = dirItems.GetPhyPath(pairs[i].Index);
       if (NFind::DoesDirExist(phyPath))
       {
         RINOK(callback->DeletingAfterArchiving(phyPath, true));
