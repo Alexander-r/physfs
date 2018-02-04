@@ -109,7 +109,7 @@ static const ISzAlloc g_Alloc = { sz_alloc, sz_free };
  */
 static SRes sz_file_read(const ISeekInStream *object, void *buffer, size_t *size)
 {
-    BAIL_IF_MACRO(size == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
+    BAIL_IF(size == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
     SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
 
@@ -124,7 +124,7 @@ static SRes sz_file_read(const ISeekInStream *object, void *buffer, size_t *size
  */
 static SRes sz_file_seek(const ISeekInStream *object, Int64 *pos, ESzSeek origin)
 {
-    BAIL_IF_MACRO(pos == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
+    BAIL_IF(pos == NULL, PHYSFS_ERR_INVALID_ARGUMENT, SZ_ERROR_PARAM);
 
     SZfileinstream *s = (SZfileinstream *)object; /* Safe, as long as ISzInStream *s is the first field in SZfileinstream */
     PHYSFS_uint64 position = *pos;
@@ -208,7 +208,7 @@ static SZfile * sz_find_file(const SZarchive *archive, const char *name)
 {
     SZfile *file = bsearch(name, archive->files, archive->db.NumFiles, sizeof(*archive->files), sz_file_cmp_stdlib);
 
-    BAIL_IF_MACRO(file == NULL, PHYSFS_ERR_NOT_FOUND, NULL);
+    BAIL_IF(file == NULL, PHYSFS_ERR_NOT_FOUND, NULL);
 
     return file;
 } /* sz_find_file */
@@ -391,8 +391,8 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
     size_t wantedSize = (size_t) len;
     const size_t remainingSize = file->item->Size - file->position;
 
-    BAIL_IF_MACRO(wantedSize == 0, ERRPASS, 0); /* quick rejection. */
-    BAIL_IF_MACRO(remainingSize == 0, PHYSFS_ERR_PAST_EOF, 0);
+    BAIL_IF_ERRPASS(wantedSize == 0, 0); /* quick rejection. */
+    BAIL_IF(remainingSize == 0, PHYSFS_ERR_PAST_EOF, 0);
 
     if (wantedSize > remainingSize)
         wantedSize = remainingSize;
@@ -421,8 +421,8 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
         if (rc != SZ_OK)
             return -1;
 
-        BAIL_IF_MACRO(wantedSize > fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
-        BAIL_IF_MACRO(file->item->Size != fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
+        BAIL_IF(wantedSize > fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
+        BAIL_IF(file->item->Size != fileSize, PHYSFS_ERR_OTHER_ERROR, -1);
     } /* if */
 
     /* Copy wanted bytes over from cache to outBuf */
@@ -436,7 +436,7 @@ static PHYSFS_sint64 SZ_read(PHYSFS_Io *io, void *outBuf, PHYSFS_uint64 len)
 
 static PHYSFS_sint64 SZ_write(PHYSFS_Io *io, const void *b, PHYSFS_uint64 len)
 {
-    BAIL_MACRO(PHYSFS_ERR_READ_ONLY, -1);
+    BAIL(PHYSFS_ERR_READ_ONLY, -1);
 } /* SZ_write */
 
 
@@ -451,7 +451,7 @@ static int SZ_seek(PHYSFS_Io *io, PHYSFS_uint64 offset)
 {
     SZfile *file = (SZfile *) io->opaque;
 
-    BAIL_IF_MACRO(offset > file->item->Size, PHYSFS_ERR_PAST_EOF, 0);
+    BAIL_IF(offset > file->item->Size, PHYSFS_ERR_PAST_EOF, 0);
 
     file->position = offset; /* We only use a virtual position... */
 
@@ -470,7 +470,7 @@ static PHYSFS_Io *SZ_duplicate(PHYSFS_Io *_io)
 {
     /* !!! FIXME: this archiver needs to be reworked to allow multiple
      * !!! FIXME:  opens before we worry about duplication. */
-    BAIL_MACRO(PHYSFS_ERR_UNSUPPORTED, NULL);
+    BAIL(PHYSFS_ERR_UNSUPPORTED, NULL);
 } /* SZ_duplicate */
 
 
@@ -512,21 +512,19 @@ static const PHYSFS_Io SZ_Io =
 };
 
 
-static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
+static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting, int *claimed)
 {
     size_t len = 0;
     SZarchive *archive = NULL;
 
-    BAIL_IF_MACRO(io == NULL, PHYSFS_ERR_INVALID_ARGUMENT, NULL);
-    BAIL_IF_MACRO(forWriting, PHYSFS_ERR_READ_ONLY, NULL);
+    BAIL_IF(io == NULL, PHYSFS_ERR_INVALID_ARGUMENT, NULL);
+    BAIL_IF(forWriting, PHYSFS_ERR_READ_ONLY, NULL);
 
     archive = (SZarchive *) allocator.Malloc(sizeof (SZarchive));
-    BAIL_IF_MACRO(archive == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
+    BAIL_IF(archive == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
 
     sz_archive_init(archive);
     archive->inStream.io = io;
-
-    CrcGenerateTable();
 
     SzArEx_Init(&archive->db);
 
@@ -548,6 +546,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
         sz_archive_exit(archive);
         return NULL; /* Error is set by sz_err! */
     } /* if */
+    *claimed = 1;
 
     len = archive->db.NumFiles * sizeof (SZfile);
     archive->files = (SZfile *) allocator.Malloc(len);
@@ -555,7 +554,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     {
         SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
-        BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
+        BAIL(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
 
     /*
@@ -570,7 +569,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     {
         SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
-        BAIL_MACRO(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
+        BAIL(PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     }
 
     /*
@@ -583,7 +582,7 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
     {
         SzArEx_Free(&archive->db, archive->allocImp);
         sz_archive_exit(archive);
-        BAIL_MACRO(PHYSFS_ERR_OTHER_ERROR, NULL);
+        BAIL(PHYSFS_ERR_OTHER_ERROR, NULL);
     }
 
     return archive;
@@ -594,29 +593,32 @@ static void *SZ_openArchive(PHYSFS_Io *io, const char *name, int forWriting)
  * Moved to seperate function so we can use alloca then immediately throw
  *  away the allocated stack space...
  */
-static void doEnumCallback(PHYSFS_EnumFilesCallback cb, void *callbackdata,
+static PHYSFS_EnumerateCallbackResult doEnumCallback(PHYSFS_EnumerateCallback cb, void *callbackdata,
                            const char *odir, const char *str, size_t flen)
 {
     char *newstr = __PHYSFS_smallAlloc(flen + 1);
     if (newstr == NULL)
-        return;
+        return PHYSFS_ENUM_ERROR;
 
     memcpy(newstr, str, flen);
     newstr[flen] = '\0';
-    cb(callbackdata, odir, newstr);
+    PHYSFS_EnumerateCallbackResult retval = cb(callbackdata, odir, newstr);
     __PHYSFS_smallFree(newstr);
+    return retval;
 } /* doEnumCallback */
 
 
-static void SZ_enumerateFiles(void *opaque, const char *dname,
-                                PHYSFS_EnumFilesCallback cb,
-                                const char *origdir, void *callbackdata)
+static PHYSFS_EnumerateCallbackResult SZ_enumerateFiles(void *opaque,
+                         const char *dname, PHYSFS_EnumerateCallback cb,
+                         const char *origdir, void *callbackdata)
 {
     size_t dlen = strlen(dname),
            dlen_inc = dlen + ((dlen > 0) ? 1 : 0);
     SZarchive *archive = (SZarchive *) opaque;
     SZfile *file = NULL,
            *lastFile = &archive->files[archive->db.NumFiles];
+
+    PHYSFS_EnumerateCallbackResult retval = PHYSFS_ENUM_OK;
 
     if (dlen)
     {
@@ -629,7 +631,7 @@ static void SZ_enumerateFiles(void *opaque, const char *dname,
         file = archive->files;
     }
 
-    BAIL_IF_MACRO(file == NULL, PHYSFS_ERR_NOT_FOUND, );
+    BAIL_IF(file == NULL, PHYSFS_ERR_NOT_FOUND, PHYSFS_ENUM_ERROR);
 
     while (file < lastFile)
     {
@@ -646,27 +648,29 @@ static void SZ_enumerateFiles(void *opaque, const char *dname,
         }
 
         /* Do the actual callback... */
-        doEnumCallback(cb, callbackdata, origdir, dirNameEnd, strlen(dirNameEnd));
-
+        retval = doEnumCallback(cb, callbackdata, origdir, dirNameEnd, strlen(dirNameEnd));
+        if (retval == PHYSFS_ENUM_ERROR)
+            PHYSFS_setErrorCode(PHYSFS_ERR_APP_CALLBACK);
         file++;
     }
+    return retval;
 } /* SZ_enumerateFiles */
 
 
-static PHYSFS_Io *SZ_openRead(void *opaque, const char *name)
+static PHYSFS_Io *SZ_openRead(void *opaque, const char *path)
 {
     SZarchive *archive = (SZarchive *) opaque;
-    SZfile *file = sz_find_file(archive, name);
+    SZfile *file = sz_find_file(archive, path);
     PHYSFS_Io *io = NULL;
 
-    BAIL_IF_MACRO(file == NULL, PHYSFS_ERR_NOT_FOUND, NULL);
-    BAIL_IF_MACRO(file->folder == NULL, PHYSFS_ERR_NOT_A_FILE, NULL);
+    BAIL_IF(file == NULL, PHYSFS_ERR_NOT_FOUND, NULL);
+    BAIL_IF(file->folder == NULL, PHYSFS_ERR_NOT_A_FILE, NULL);
 
     file->position = 0;
     file->folder->references++; /* Increase refcount for automatic cleanup... */
 
     io = (PHYSFS_Io *) allocator.Malloc(sizeof (PHYSFS_Io));
-    BAIL_IF_MACRO(io == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
+    BAIL_IF(io == NULL, PHYSFS_ERR_OUT_OF_MEMORY, NULL);
     memcpy(io, &SZ_Io, sizeof (*io));
     io->opaque = file;
 
@@ -676,13 +680,13 @@ static PHYSFS_Io *SZ_openRead(void *opaque, const char *name)
 
 static PHYSFS_Io *SZ_openWrite(void *opaque, const char *filename)
 {
-    BAIL_MACRO(PHYSFS_ERR_READ_ONLY, NULL);
+    BAIL(PHYSFS_ERR_READ_ONLY, NULL);
 } /* SZ_openWrite */
 
 
 static PHYSFS_Io *SZ_openAppend(void *opaque, const char *filename)
 {
-    BAIL_MACRO(PHYSFS_ERR_READ_ONLY, NULL);
+    BAIL(PHYSFS_ERR_READ_ONLY, NULL);
 } /* SZ_openAppend */
 
 
@@ -709,19 +713,19 @@ static void SZ_closeArchive(void *opaque)
 
 static int SZ_remove(void *opaque, const char *name)
 {
-    BAIL_MACRO(PHYSFS_ERR_READ_ONLY, 0);
+    BAIL(PHYSFS_ERR_READ_ONLY, 0);
 } /* SZ_remove */
 
 
 static int SZ_mkdir(void *opaque, const char *name)
 {
-    BAIL_MACRO(PHYSFS_ERR_READ_ONLY, 0);
+    BAIL(PHYSFS_ERR_READ_ONLY, 0);
 } /* SZ_mkdir */
 
-static int SZ_stat(void *opaque, const char *filename, PHYSFS_Stat *stat)
+static int SZ_stat(void *opaque, const char *path, PHYSFS_Stat *stat)
 {
     const SZarchive *archive = (const SZarchive *) opaque;
-    const SZfile *file = sz_find_file(archive, filename);
+    const SZfile *file = sz_find_file(archive, path);
 
     if (!file)
         return 0;
@@ -751,13 +755,25 @@ static int SZ_stat(void *opaque, const char *filename, PHYSFS_Stat *stat)
     return 1;
 } /* SZ_stat */
 
+void SZIP_global_init(void)
+{
+    /* this just needs to calculate some things, so it only ever
+       has to run once, even after a deinit. */
+    static int generatedTable = 0;
+    if (!generatedTable)
+    {
+        generatedTable = 1;
+        CrcGenerateTable();
+    } /* if */
+} /* SZIP_global_init */
 
-const PHYSFS_Archiver __PHYSFS_Archiver_SZ =
+
+const PHYSFS_Archiver __PHYSFS_Archiver_7Z =
 {
     CURRENT_PHYSFS_ARCHIVER_API_VERSION,
     {
-        "7z",
-        "7Zip format",
+        "7Z",
+        "7zip archives",
         "Dennis Schridde <devurandom@gmx.net>",
         "https://icculus.org/physfs/",
         0,  /* supportsSymlinks */

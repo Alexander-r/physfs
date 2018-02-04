@@ -14,10 +14,10 @@ DEFINES += PHYSFS_SUPPORTS_MVL=1
 DEFINES += PHYSFS_SUPPORTS_QPAK=1
 DEFINES += PHYSFS_SUPPORTS_SLB=1
 DEFINES += PHYSFS_SUPPORTS_ISO9660=1
+DEFINES += PHYSFS_SUPPORTS_VDF=1
 
 INCLUDEPATH += $$PWD/lzma/C
 INCLUDEPATH += $$PWD/src 
-INCLUDEPATH += /usr/include
 
 SOURCES += \
     test/test_physfs.c \
@@ -35,26 +35,24 @@ SOURCES += \
     lzma/C/Bra86.c \
     lzma/C/BraIA64.c \
     lzma/C/Bcj2.c \
-    src/archiver_7z.c \
-    src/platform_beos.cpp \
-    src/platform_winrt.cpp \
-    src/archiver_dir.c \
-    src/archiver_grp.c \
-    src/archiver_hog.c \
-    src/archiver_iso9660.c \
-    src/archiver_mvl.c \
-    src/archiver_qpak.c \
-    src/archiver_slb.c \
-    src/archiver_unpacked.c \
-    src/archiver_wad.c \
-    src/archiver_zip.c \
+    src/physfs_archiver_7z_upstream.c \
+    src/physfs_archiver_dir.c \
+    src/physfs_archiver_grp.c \
+    src/physfs_archiver_hog.c \
+    src/physfs_archiver_iso9660.c \
+    src/physfs_archiver_mvl.c \
+    src/physfs_archiver_qpak.c \
+    src/physfs_archiver_slb.c \
+    src/physfs_archiver_unpacked.c \
+    src/physfs_archiver_vdf.c \
+    src/physfs_archiver_wad.c \
+    src/physfs_archiver_zip.c \
     src/physfs.c \
     src/physfs_byteorder.c \
     src/physfs_unicode.c \
-    src/platform_macosx.c \
-    src/platform_posix.c \
-    src/platform_unix.c \
-    src/platform_windows.c
+    src/physfs_platform_posix.c \
+    src/physfs_platform_unix.c \
+    src/physfs_platform_windows.c
 
 HEADERS += \
     src/physfs.h \

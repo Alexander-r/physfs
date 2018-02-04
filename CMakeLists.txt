@@ -80,7 +80,6 @@ set(PHYSFS_SRCS
     src/physfs_archiver_unpacked.c
     src/physfs_archiver_grp.c
     src/physfs_archiver_hog.c
-    src/physfs_archiver_7z.c
     src/physfs_archiver_mvl.c
     src/physfs_archiver_qpak.c
     src/physfs_archiver_wad.c
@@ -105,6 +104,35 @@ endif()
 option(PHYSFS_ARCHIVE_7Z "Enable 7zip support" TRUE)
 if(NOT PHYSFS_ARCHIVE_7Z)
     add_definitions(-DPHYSFS_SUPPORTS_7Z=0)
+endif()
+
+option(PHYSFS_ARCHIVE_7Z_UPSTREAM_SDK "Use upstream LZMA SDK" TRUE)
+if(PHYSFS_ARCHIVE_7Z_UPSTREAM_SDK)
+	set(LZMA_SRCS
+		lzma/C/7zArcIn.c
+		lzma/C/7zCrc.c
+		lzma/C/7zCrcOpt.c
+		lzma/C/7zBuf.c
+		lzma/C/Delta.c
+		lzma/C/LzmaDec.c
+		lzma/C/Lzma2Dec.c
+		lzma/C/7zDec.c
+		lzma/C/7zStream.c
+		lzma/C/CpuArch.c
+		lzma/C/Bra.c
+		lzma/C/Bra86.c
+		lzma/C/BraIA64.c
+		lzma/C/Bcj2.c
+		src/physfs_archiver_7z_upstream.c
+	)
+    include_directories(lzma/C)
+    set(PHYSFS_SRCS ${PHYSFS_SRCS} ${LZMA_SRCS})
+    set(PHYSFS_INTERNAL_LZMA TRUE)
+else()
+	set(LZMA_SRCS
+		src/physfs_archiver_7z.c
+	)
+	set(PHYSFS_SRCS ${PHYSFS_SRCS} ${LZMA_SRCS})
 endif()
 
 option(PHYSFS_ARCHIVE_GRP "Enable Build Engine GRP support" TRUE)
